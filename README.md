@@ -5,33 +5,6 @@ A drag-and-drop spelling practice app for 11+ exam preparation.
 
 ---
 
-## 🚀 Deploy to GitHub Pages (5 minutes)
-
-### Step 1 — Create a repository
-1. Go to [github.com](https://github.com) and click **New repository**
-2. Name it `spelling-master` (or anything you like)
-3. Set it to **Public**
-4. Click **Create repository**
-
-### Step 2 — Upload the file
-1. Click **Add file → Upload files**
-2. Drag `index.html` into the upload area
-3. Click **Commit changes**
-
-### Step 3 — Enable GitHub Pages
-1. Go to your repository → **Settings** → **Pages** (left sidebar)
-2. Under **Source**, select **Deploy from a branch**
-3. Choose branch: `main` · folder: `/ (root)`
-4. Click **Save**
-
-### Step 4 — Open your app
-After about 60 seconds, your app will be live at:
-```
-https://YOUR-USERNAME.github.io/spelling-master/
-```
-
----
-
 ## 💾 How history is saved
 
 History is saved to the browser's **localStorage** on the user's device.
