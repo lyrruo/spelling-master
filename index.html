@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Spelling Master — 11+ Practice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    @keyframes popIn   { 0%{transform:scale(1)} 50%{transform:scale(1.15)} 100%{transform:scale(1)} }
+    @keyframes shakeX  { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-7px)} 40%,80%{transform:translateX(7px)} }
+    @keyframes fadeUp  { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.55} }
+    @keyframes ghostBounce { 0%{transform:translate(-50%,-50%) scale(0.85)} 100%{transform:translate(-50%,-50%) scale(1.05)} }
+    @keyframes dropPop { 0%{transform:scale(1.4)} 100%{transform:scale(1)} }
+    @keyframes slideIn { from{opacity:0;transform:translateX(18px)} to{opacity:1;transform:translateX(0)} }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin:0; padding:0; background:#0A0B1E; }
+    ::-webkit-scrollbar { width:5px }
+    ::-webkit-scrollbar-track { background:#141528 }
+    ::-webkit-scrollbar-thumb { background:#252645; border-radius:3px }
+  </style>
+
+  <!-- React 18 -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Recharts -->
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" crossorigin></script>
+  <!-- Babel (JSX in-browser transform) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const {
+  LineChart, Line, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, CartesianGrid, ReferenceLine
+} = Recharts;
+
+// ── Word Groups ───────────────────────────────────────────────────────────────
+const GROUPS = [
+  { id:0, name:"Tricky Double Letters", icon:"✌️", color:"#FF6B6B",
+    words:["accommodation","committee","embarrass","exaggerate","necessary","occurrence","possession","recommend","disappear","millennium"] },
+  { id:1, name:"Silent Letters", icon:"🤫", color:"#4ECDC4",
+    words:["acknowledge","conscience","disguise","guarantee","knowledge","muscle","rhythm","subtle","wreckage","wrestle"] },
+  { id:2, name:"-ible / -able Words", icon:"📚", color:"#74B9FF",
+    words:["responsible","comfortable","considerable","fashionable","flexible","horrible","possible","reasonable","terrible","visible"] },
+  { id:3, name:"-tion / -sion Endings", icon:"🔤", color:"#A29BFE",
+    words:["ambition","comprehension","conclusion","confusion","dimension","extension","permission","possession","profession","suspension"] },
+  { id:4, name:"-ous Endings", icon:"⭐", color:"#FFEAA7",
+    words:["adventurous","ambitious","continuous","courageous","disastrous","glamorous","humorous","mischievous","notorious","ridiculous"] },
+  { id:5, name:"-ent / -ant Endings", icon:"🎯", color:"#FD79A8",
+    words:["apparent","confident","convenient","excellent","frequent","ignorant","innocent","magnificent","relevant","tolerant"] },
+];
+const ALL_WORDS = GROUPS.flatMap(g => g.words);
+const R2_TOTAL  = 4;
+const STORAGE_KEY = "sm-history-v1";
+
+// ── Design Tokens ─────────────────────────────────────────────────────────────
+const T = {
+  bg:"#0A0B1E", card:"#141528", card2:"#1A1B35", border:"#252645",
+  text:"#E8E9FF", muted:"#8B8FAD", correct:"#00D4A0", wrong:"#FF4757", gold:"#FFD700",
+  font:"'Nunito',sans-serif", head:"'Fredoka One',cursive",
+};
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+function storageLoad() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function storageSave(records) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); } catch {}
+}
+
+// ── Utility helpers ───────────────────────────────────────────────────────────
+function speak(word) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(word);
+  u.rate = 0.75; u.pitch = 1;
+  window.speechSynthesis.speak(u);
+}
+function weightedPick(pool, weights, n) {
+  const avail = [...pool], res = [];
+  while (res.length < n && avail.length > 0) {
+    const total = avail.reduce((s, w) => s + (weights[w] || 1), 0);
+    let r = Math.random() * total, chosen = avail[0];
+    for (const w of avail) { r -= (weights[w] || 1); if (r <= 0) { chosen = w; break; } }
+    res.push(chosen); avail.splice(avail.indexOf(chosen), 1);
+  }
+  return res;
+}
+function fmtDuration(secs) {
+  if (!secs || secs < 0) return "—";
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs/60)}m ${secs%60}s`;
+}
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+}
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+}
+const roundColor = r => ({1:"#74B9FF",2:"#A29BFE",3:"#FD79A8"}[r]||"#74B9FF");
+
+// ── Shared UI ─────────────────────────────────────────────────────────────────
+function Btn({ onClick, bg="#74B9FF", full, large, children, disabled, outline }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button onClick={onClick} disabled={disabled}
+      onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{
+        background: outline?"transparent":bg,
+        color: outline?T.muted:"#fff",
+        border: outline?`1.5px solid ${T.border}`:"none",
+        borderRadius:"14px",
+        padding:large?"14px 32px":"10px 22px",
+        fontSize:large?"1.05rem":"0.93rem",
+        fontWeight:800, fontFamily:T.font,
+        cursor:disabled?"not-allowed":"pointer",
+        width:full?"100%":"auto", opacity:disabled?0.5:1,
+        transform:hov&&!disabled?"translateY(-2px)":"none",
+        boxShadow:hov&&!disabled?"0 8px 22px rgba(0,0,0,0.45)":"0 3px 10px rgba(0,0,0,0.2)",
+        transition:"all 0.15s ease",
+      }}>
+      {children}
+    </button>
+  );
+}
+function Card({ children, style:sx }) {
+  return (
+    <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:"20px", padding:"20px", ...sx }}>
+      {children}
+    </div>
+  );
+}
+function Page({ children }) {
+  return (
+    <div style={{ fontFamily:T.font, background:T.bg, minHeight:"100vh", color:T.text,
+      display:"flex", flexDirection:"column", alignItems:"center", padding:"20px 14px", gap:"16px" }}>
+      {children}
+    </div>
+  );
+}
+function Badge({ round, sub, color }) {
+  const rc = color || roundColor(round);
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"0.83rem", color:T.muted }}>
+      <span style={{ background:rc, color:"#fff", borderRadius:"20px", padding:"3px 11px", fontWeight:800, fontSize:"0.76rem" }}>
+        Round {round}
+      </span>
+      {sub && <span>{sub}</span>}
+    </div>
+  );
+}
+function DiffHighlight({ correct, attempt }) {
+  return (
+    <span style={{ fontFamily:T.head, fontSize:"1.5rem", letterSpacing:"2px" }}>
+      {correct.split("").map((ch, i) => {
+        const ok = ch.toLowerCase() === (attempt?.[i]||"").toLowerCase();
+        return <span key={i} style={{ color:ok?T.text:T.wrong, textDecoration:ok?"none":"underline 2px" }}>{ch}</span>;
+      })}
+    </span>
+  );
+}
+
+// ── Tab Bar ───────────────────────────────────────────────────────────────────
+function TabBar({ tab, setTab }) {
+  const tabs = [
+    { id:"practice", label:"🏠 Practice" },
+    { id:"history",  label:"📋 History"  },
+    { id:"report",   label:"📈 Report"   },
+  ];
+  return (
+    <div style={{ display:"flex", background:T.card, border:`1px solid ${T.border}`,
+      borderRadius:"16px", padding:"5px", gap:"4px", width:"100%", maxWidth:"520px" }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={()=>setTab(t.id)} style={{
+          flex:1, border:"none", borderRadius:"12px", padding:"10px 4px",
+          fontFamily:T.font, fontWeight:800, fontSize:"0.8rem", cursor:"pointer",
+          background: tab===t.id?"linear-gradient(135deg,#74B9FF,#A29BFE)":"transparent",
+          color: tab===t.id?"#fff":T.muted,
+          transition:"all 0.2s ease",
+          boxShadow: tab===t.id?"0 3px 10px rgba(0,0,0,0.3)":"none",
+        }}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
+// ── Keyboard (3 rows, drag-to-drop) ──────────────────────────────────────────
+const KB_ROWS = [
+  ["A","B","C","D","E","F","G","H","I"],
+  ["J","K","L","M","N","O","P","Q","R","S"],
+  ["T","U","V","W","X","Y","Z"],
+];
+
+function AlphaKeyboard({ onLetter, onBack, onClear, disabled, accentColor, dropZoneRef, onDragOverZone }) {
+  const dragLetterRef = useRef(null);
+  const [ghost, setGhost]     = useState({ visible:false, x:0, y:0, ch:"" });
+  const [lifting, setLifting] = useState(null);
+
+  // Touch drag
+  const startTouchDrag = (e, ch) => {
+    if (disabled) return;
+    e.preventDefault();
+    dragLetterRef.current = ch;
+    const t = e.touches[0];
+    setLifting(ch);
+    setGhost({ visible:true, x:t.clientX, y:t.clientY, ch });
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragLetterRef.current) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      setGhost(g => ({ ...g, x:t.clientX, y:t.clientY }));
+      if (dropZoneRef?.current) {
+        const r = dropZoneRef.current.getBoundingClientRect();
+        const over = t.clientX>=r.left && t.clientX<=r.right && t.clientY>=r.top && t.clientY<=r.bottom;
+        onDragOverZone?.(over);
+      }
+    };
+    const onEnd = (e) => {
+      if (!dragLetterRef.current) return;
+      const t = e.changedTouches[0];
+      if (dropZoneRef?.current) {
+        const r = dropZoneRef.current.getBoundingClientRect();
+        const over = t.clientX>=r.left && t.clientX<=r.right && t.clientY>=r.top && t.clientY<=r.bottom;
+        if (over) onLetter(dragLetterRef.current.toLowerCase());
+      }
+      dragLetterRef.current = null;
+      setGhost(g => ({ ...g, visible:false }));
+      setLifting(null);
+      onDragOverZone?.(false);
+    };
+    window.addEventListener("touchmove", onMove, { passive:false });
+    window.addEventListener("touchend", onEnd);
+    return () => {
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+    };
+  }, [onLetter, dropZoneRef, onDragOverZone]);
+
+  // Mouse drag (HTML5)
+  const onDragStart = (e, ch) => {
+    if (disabled) { e.preventDefault(); return; }
+    e.dataTransfer.setData("text/plain", ch);
+    dragLetterRef.current = ch;
+    setLifting(ch);
+    const el = document.createElement("div");
+    el.textContent = ch;
+    Object.assign(el.style, {
+      position:"fixed", top:"-999px",
+      width:"44px", height:"44px", borderRadius:"50%",
+      background: accentColor, color:"#fff",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontSize:"1.3rem", fontWeight:900, fontFamily:"'Fredoka One',cursive",
+    });
+    document.body.appendChild(el);
+    e.dataTransfer.setDragImage(el, 22, 22);
+    setTimeout(() => document.body.removeChild(el), 0);
+  };
+  const onDragEnd = () => { setLifting(null); dragLetterRef.current=null; onDragOverZone?.(false); };
+
+  const keyStyle = (ch) => {
+    const lifted = lifting===ch;
+    return {
+      background: lifted ? accentColor : "#1E2040",
+      color: lifted ? "#fff" : "#C8CAEF",
+      border: `1.5px solid ${lifted ? accentColor : "#2E3060"}`,
+      borderRadius:"10px", width:"38px", height:"44px",
+      fontSize:"1rem", fontWeight:800, fontFamily:"'Fredoka One',cursive",
+      cursor: disabled ? "not-allowed" : "grab",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      boxShadow: lifted ? `0 0 14px ${accentColor}99` : "0 3px 6px rgba(0,0,0,0.35)",
+      transform: lifted ? "scale(0.88) translateY(-3px)" : "scale(1)",
+      transition:"all 0.12s ease", opacity:disabled?0.4:1,
+      userSelect:"none", WebkitUserSelect:"none", touchAction:"none",
+    };
+  };
+  const spStyle = (bg) => ({
+    background:disabled?"#1E2040":bg, color:"#fff", border:"none",
+    borderRadius:"10px", height:"40px", padding:"0 14px",
+    fontSize:"0.84rem", fontWeight:800, fontFamily:T.font,
+    cursor:disabled?"not-allowed":"pointer",
+    boxShadow:"0 3px 6px rgba(0,0,0,0.3)", transition:"all 0.1s ease",
+    opacity:disabled?0.4:1, userSelect:"none",
+    display:"flex", alignItems:"center", justifyContent:"center",
+  });
+
+  return (
+    <>
+      {ghost.visible && (
+        <div style={{
+          position:"fixed", left:ghost.x, top:ghost.y, zIndex:9999,
+          transform:"translate(-50%,-50%)",
+          width:"52px", height:"52px", borderRadius:"50%",
+          background:accentColor, color:"#fff",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:"1.5rem", fontWeight:900, fontFamily:"'Fredoka One',cursive",
+          boxShadow:`0 8px 24px ${accentColor}88`,
+          pointerEvents:"none", animation:"ghostBounce 0.15s ease",
+        }}>{ghost.ch}</div>
+      )}
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"6px", padding:"6px 0 2px" }}>
+        <div style={{ color:T.muted, fontSize:"0.72rem", fontWeight:700, marginBottom:"2px", letterSpacing:"0.04em" }}>
+          ↓ DRAG A LETTER DOWN INTO THE BOX BELOW ↓
+        </div>
+        {KB_ROWS.map((row,ri) => (
+          <div key={ri} style={{ display:"flex", gap:"5px" }}>
+            {row.map(ch => (
+              <div key={ch} style={keyStyle(ch)}
+                draggable={!disabled}
+                onDragStart={e=>onDragStart(e,ch)}
+                onDragEnd={onDragEnd}
+                onTouchStart={e=>startTouchDrag(e,ch)}
+              >{ch}</div>
+            ))}
+          </div>
+        ))}
+        <div style={{ display:"flex", gap:"8px", marginTop:"4px" }}>
+          <div style={spStyle("#E84393")} onClick={()=>!disabled&&onClear()}>✕ Clear</div>
+          <div style={spStyle("#FF6B35")} onClick={()=>!disabled&&onBack()}>⌫ Back</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Study Screen ──────────────────────────────────────────────────────────────
+function StudyScreen({ group, groupNum, onReady, onHome }) {
+  const [hi, setHi] = useState(0);
+  const timerRef = useRef();
+  const advance = (i) => {
+    speak(group.words[i]);
+    if (i+1 < group.words.length)
+      timerRef.current = setTimeout(()=>{ setHi(i+1); advance(i+1); }, 2300);
+  };
+  useEffect(()=>{ advance(0); return ()=>clearTimeout(timerRef.current); }, []);
+  const clickWord = (i) => { clearTimeout(timerRef.current); setHi(i); speak(group.words[i]); };
+
+  return (
+    <Page>
+      <div style={{ width:"100%", maxWidth:"520px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <Badge round={1} sub={`Group ${groupNum} of 6 · ${group.name}`} color={group.color} />
+        <Btn onClick={onHome} outline>🏠 Home</Btn>
+      </div>
+      <Card style={{ width:"100%", maxWidth:"520px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"14px" }}>
+          <span style={{ fontSize:"2rem" }}>{group.icon}</span>
+          <div>
+            <div style={{ fontFamily:T.head, fontSize:"1.3rem", color:group.color }}>{group.name}</div>
+            <div style={{ color:T.muted, fontSize:"0.82rem" }}>Study Phase 👀 — words read aloud automatically</div>
+          </div>
+        </div>
+        <p style={{ color:T.muted, fontSize:"0.85rem", margin:"0 0 12px" }}>
+          Click any word to hear it again. Press Ready when you've studied them all.
+        </p>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"16px" }}>
+          {group.words.map((w,i) => (
+            <div key={w} onClick={()=>clickWord(i)} style={{
+              padding:"10px 12px", borderRadius:"10px", cursor:"pointer",
+              fontWeight:700, fontSize:"0.92rem",
+              background:i===hi?group.color:T.card2, color:i===hi?"#fff":T.text,
+              border:`2px solid ${i===hi?group.color:"transparent"}`,
+              boxShadow:i===hi?`0 3px 12px ${group.color}55`:"none",
+              transition:"all 0.2s ease",
+            }}>
+              <span style={{ color:i===hi?"rgba(255,255,255,0.6)":T.muted, fontSize:"0.72rem", marginRight:"5px" }}>{i+1}.</span>{w}
+            </div>
+          ))}
+        </div>
+        <Btn onClick={onReady} bg={group.color} full large>✏️ I'm Ready to Spell!</Btn>
+      </Card>
+    </Page>
+  );
+}
+
+// ── Quiz Screen ───────────────────────────────────────────────────────────────
+function QuizScreen({ words, round, group, sessionLabel, onDone, onWrong, onHome }) {
+  const [qi, setQi]               = useState(0);
+  const [val, setVal]             = useState("");
+  const [revealed, setRevealed]   = useState(false);
+  const [correct, setCorrect]     = useState(false);
+  const [anim, setAnim]           = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [justDropped, setJustDropped] = useState(false);
+  const resultsRef  = useRef([]);
+  const startRef    = useRef(Date.now());
+  const dropZoneRef = useRef(null);
+
+  const rc   = group ? group.color : roundColor(round);
+  const word = words[qi];
+
+  useEffect(()=>{ setTimeout(()=>speak(words[0]), 500); }, []);
+
+  const addLetter = (ch) => {
+    if (!revealed) {
+      setVal(v=>v+ch.toLowerCase());
+      setJustDropped(true);
+      setTimeout(()=>setJustDropped(false), 300);
+    }
+  };
+  const backspace = () => { if (!revealed) setVal(v=>v.slice(0,-1)); };
+  const clearAll  = () => { if (!revealed) setVal(""); };
+
+  const doCheck = () => {
+    if (!val.trim()||revealed) return;
+    const ok = val.trim().toLowerCase()===word.toLowerCase();
+    setCorrect(ok); setRevealed(true);
+    setAnim(ok?"popIn":"shakeX"); setTimeout(()=>setAnim(""),500);
+    resultsRef.current=[...resultsRef.current,{word,answer:val.trim(),correct:ok}];
+    if (!ok) onWrong(word);
+  };
+  const doNext = () => {
+    if (qi+1>=words.length) {
+      onDone(resultsRef.current, Math.round((Date.now()-startRef.current)/1000)); return;
+    }
+    const n=qi+1; setQi(n); setVal(""); setRevealed(false); setCorrect(false);
+    setTimeout(()=>speak(words[n]),350);
+  };
+
+  const pct = Math.round(qi/words.length*100);
+
+  function LetterDisplay() {
+    const letters = val.split("");
+    return (
+      <div ref={dropZoneRef}
+        onDragOver={e=>{ e.preventDefault(); setIsDragOver(true); }}
+        onDragLeave={()=>setIsDragOver(false)}
+        onDrop={e=>{
+          e.preventDefault(); setIsDragOver(false);
+          const ch = e.dataTransfer.getData("text/plain");
+          if (ch) addLetter(ch.toLowerCase());
+        }}
+        style={{
+          minHeight:"70px",
+          background: isDragOver ? rc+"18" : T.card2,
+          border:`2px ${isDragOver?"dashed":"solid"} ${isDragOver ? rc : revealed?(correct?T.correct:T.wrong):rc+"55"}`,
+          borderRadius:"14px", padding:"10px 14px", marginBottom:"10px",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          flexWrap:"wrap", gap:"5px",
+          animation:anim?`${anim} 0.45s ease`:"none",
+          transition:"background 0.15s, border-color 0.15s",
+          position:"relative",
+        }}
+      >
+        {isDragOver && !revealed && (
+          <div style={{ position:"absolute", inset:0, borderRadius:"12px",
+            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+            <span style={{ fontSize:"1.8rem", opacity:0.5 }}>+</span>
+          </div>
+        )}
+        {letters.length===0 && !isDragOver
+          ? <span style={{color:T.muted,fontSize:"0.88rem",fontStyle:"italic",textAlign:"center",lineHeight:1.5}}>
+              Drag a letter here<br/>
+              <span style={{fontSize:"0.75rem"}}>↑ from the keyboard above ↑</span>
+            </span>
+          : letters.map((ch,i)=>(
+            <span key={i} style={{
+              display:"inline-flex",alignItems:"center",justifyContent:"center",
+              width:"32px",height:"36px",
+              background:revealed?(ch===word[i]?"#00D4A022":"#FF475722"):"#252645",
+              border:`1.5px solid ${revealed?(ch===word[i]?T.correct:T.wrong):rc+"55"}`,
+              borderRadius:"8px", fontFamily:T.head, fontSize:"1.15rem",
+              color:revealed?(ch===word[i]?T.correct:T.wrong):T.text,
+              animation:(!revealed&&i===letters.length-1&&justDropped)?"dropPop 0.25s ease":"none",
+            }}>{ch}</span>
+          ))
+        }
+        {!revealed && letters.length>0 && (
+          <span style={{width:"2px",height:"28px",background:rc,borderRadius:"2px",
+            animation:"pulse 1s ease infinite",display:"inline-block",marginLeft:"1px"}}/>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <Page>
+      <div style={{width:"100%",maxWidth:"520px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <Badge round={round} sub={sessionLabel} color={rc}/>
+          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+            <span style={{fontWeight:800,color:rc}}>{qi+1}/{words.length}</span>
+            <Btn onClick={onHome} outline>🏠 Home</Btn>
+          </div>
+        </div>
+        <div style={{height:"6px",background:T.card2,borderRadius:"3px",marginTop:"10px",overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${pct}%`,background:rc,borderRadius:"3px",transition:"width 0.4s ease"}}/>
+        </div>
+      </div>
+
+      <Card style={{width:"100%",maxWidth:"520px",padding:"16px"}}>
+        <div style={{textAlign:"center",marginBottom:"12px"}}>
+          <button onClick={()=>speak(word)} style={{
+            background:`linear-gradient(135deg,${rc},${rc}bb)`,border:"none",
+            borderRadius:"50px",padding:"10px 24px",fontSize:"0.95rem",
+            fontWeight:800,color:"#fff",cursor:"pointer",fontFamily:T.font,
+            boxShadow:"0 4px 18px rgba(0,0,0,0.4)",animation:"pulse 2.5s ease infinite",
+          }}>🔊 Hear the Word Again</button>
+        </div>
+
+        <AlphaKeyboard
+          onLetter={addLetter} onBack={backspace} onClear={clearAll}
+          disabled={revealed} accentColor={rc}
+          dropZoneRef={dropZoneRef} onDragOverZone={setIsDragOver}
+        />
+
+        <LetterDisplay/>
+
+        {revealed && (
+          <div style={{textAlign:"center",marginBottom:"10px",animation:"fadeUp 0.3s ease"}}>
+            {correct
+              ? <><div style={{fontSize:"2rem"}}>🎉</div>
+                  <div style={{color:T.correct,fontWeight:800,fontSize:"1rem"}}>Brilliant! Correct! ✓</div></>
+              : <><div style={{fontSize:"2rem"}}>😬</div>
+                  <div style={{color:T.wrong,fontWeight:700,marginBottom:"6px"}}>Nearly! Correct spelling:</div>
+                  <DiffHighlight correct={word} attempt={val.trim()}/>
+                  <div style={{color:T.muted,fontSize:"0.76rem",marginTop:"5px"}}>
+                    You typed: <em style={{color:T.text}}>{val.trim()}</em>
+                  </div></>
+            }
+          </div>
+        )}
+
+        <div style={{marginTop:"10px"}}>
+          {!revealed
+            ? <Btn onClick={doCheck} bg={rc} full large disabled={!val.trim()}>Check Spelling ✓</Btn>
+            : <Btn onClick={doNext} bg={qi+1>=words.length?T.correct:rc} full large>
+                {qi+1>=words.length?"See Results 📊":"Next Word →"}
+              </Btn>
+          }
+        </div>
+      </Card>
+    </Page>
+  );
+}
+
+// ── Session End Screen ────────────────────────────────────────────────────────
+function SessionEndScreen({ results, round, continueLabel, onContinue, onHome, duration }) {
+  const score = results.filter(r=>r.correct).length;
+  const pct   = Math.round(score/results.length*100);
+  const rc    = roundColor(round);
+  const emoji = pct===100?"🌟":pct>=80?"🎉":pct>=60?"💪":"📚";
+  const msg   = pct===100?"Perfect!":pct>=80?"Great work!":pct>=60?"Good effort!":"Keep going!";
+
+  return (
+    <Page>
+      <Card style={{width:"100%",maxWidth:"520px",animation:"fadeUp 0.4s ease"}}>
+        <div style={{textAlign:"center",marginBottom:"20px"}}>
+          <div style={{fontSize:"2.5rem"}}>{emoji}</div>
+          <div style={{fontFamily:T.head,fontSize:"3rem",color:rc,lineHeight:1}}>{pct}%</div>
+          <div style={{color:T.muted,marginTop:"4px"}}>{score}/{results.length} correct · {msg}</div>
+          {duration>0 && (
+            <div style={{color:T.muted,fontSize:"0.82rem",marginTop:"4px"}}>
+              ⏱ Time taken: <strong style={{color:T.text}}>{fmtDuration(duration)}</strong>
+            </div>
+          )}
+        </div>
+        <div style={{marginBottom:"14px"}}>
+          {results.map((r,i)=>(
+            <div key={i} onClick={()=>speak(r.word)} style={{
+              display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"9px 13px",marginBottom:"6px",background:T.card2,borderRadius:"10px",
+              borderLeft:`3px solid ${r.correct?T.correct:T.wrong}`,cursor:"pointer",
+              animation:`fadeUp 0.3s ease ${i*0.04}s both`,
+            }}>
+              <span style={{fontWeight:700}}>{r.word}</span>
+              <span style={{fontSize:"0.8rem",color:r.correct?T.correct:T.wrong}}>
+                {r.correct?"✓ Correct":`✗ "${r.answer}"`}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p style={{color:T.muted,fontSize:"0.77rem",textAlign:"center",margin:"0 0 14px"}}>👆 Click any word to hear it</p>
+        <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+          <Btn onClick={onContinue} bg={rc} full large>{continueLabel}</Btn>
+          <Btn onClick={onHome} outline full>🏠 Save &amp; Go Home</Btn>
+        </div>
+      </Card>
+    </Page>
+  );
+}
+
+// ── Final Screen ──────────────────────────────────────────────────────────────
+function FinalScreen({ wrongWords, onRestart, onHome }) {
+  const sorted = [...wrongWords].sort();
+  return (
+    <Page>
+      <Card style={{width:"100%",maxWidth:"520px",animation:"fadeUp 0.4s ease"}}>
+        <div style={{textAlign:"center",marginBottom:"18px"}}>
+          <div style={{fontSize:"3.5rem"}}>🏆</div>
+          <h2 style={{fontFamily:T.head,color:T.gold,margin:"8px 0 4px",fontSize:"2rem"}}>Practice Complete!</h2>
+          {sorted.length===0
+            ? <p style={{color:T.correct,fontWeight:800,margin:0}}>Amazing — no mistakes at all! 🌟</p>
+            : <p style={{color:T.muted,margin:0}}>Here are your {sorted.length} tricky words to keep reviewing:</p>
+          }
+        </div>
+        {sorted.length>0 && (
+          <div style={{marginBottom:"18px"}}>
+            <p style={{color:"#FD79A8",fontWeight:800,fontSize:"0.78rem",margin:"0 0 10px",letterSpacing:"0.05em"}}>
+              ⚠️ TRICKY WORDS — Click to hear
+            </p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+              {sorted.map((w,i)=>(
+                <div key={w} onClick={()=>speak(w)} style={{
+                  padding:"9px 12px",background:T.card2,borderRadius:"8px",
+                  border:"1px solid #FD79A830",fontWeight:700,fontSize:"0.84rem",
+                  cursor:"pointer",animation:`fadeUp 0.3s ease ${i*0.04}s both`,
+                }}>{w}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+          <Btn onClick={onRestart} bg="linear-gradient(135deg,#74B9FF,#A29BFE)" full large>🔄 Start Again</Btn>
+          <Btn onClick={onHome} outline full>🏠 Go Home</Btn>
+        </div>
+      </Card>
+    </Page>
+  );
+}
+
+// ── History Tab ───────────────────────────────────────────────────────────────
+function HistoryTab({ history, onClear }) {
+  if (history.length===0) {
+    return (
+      <div style={{textAlign:"center",padding:"40px 20px",color:T.muted,animation:"fadeUp 0.4s ease"}}>
+        <div style={{fontSize:"3rem",marginBottom:"12px"}}>📭</div>
+        <div style={{fontWeight:700,fontSize:"1.1rem",color:T.text,marginBottom:"6px"}}>No history yet</div>
+        <div style={{fontSize:"0.88rem"}}>Complete a practice session and your results will appear here.</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{width:"100%",maxWidth:"520px",animation:"slideIn 0.35s ease"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}}>
+        <div style={{fontWeight:800,color:T.text}}>{history.length} session{history.length!==1?"s":""} recorded</div>
+        <button onClick={onClear} style={{
+          background:"transparent",border:`1px solid ${T.border}`,color:T.muted,
+          borderRadius:"10px",padding:"5px 12px",fontSize:"0.78rem",cursor:"pointer",
+          fontFamily:T.font,fontWeight:700,
+        }}>🗑 Clear All</button>
+      </div>
+      {[...history].reverse().map((rec,i)=>{
+        const pct = Math.round(rec.score/rec.total*100);
+        const col = pct===100?T.correct:pct>=80?"#74B9FF":pct>=60?"#FFEAA7":T.wrong;
+        return (
+          <div key={rec.id} style={{
+            background:T.card,border:`1px solid ${T.border}`,borderRadius:"14px",
+            padding:"14px 16px",marginBottom:"10px",
+            animation:`fadeUp 0.3s ease ${i*0.05}s both`,
+            borderLeft:`4px solid ${roundColor(rec.round)}`,
+          }}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:"0.93rem"}}>{rec.label}</div>
+                <div style={{color:T.muted,fontSize:"0.78rem",marginTop:"3px"}}>
+                  {fmtDate(rec.id)} at {fmtTime(rec.id)}
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontFamily:T.head,fontSize:"1.6rem",color:col,lineHeight:1}}>{pct}%</div>
+                <div style={{color:T.muted,fontSize:"0.76rem"}}>{rec.score}/{rec.total}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:"7px",marginTop:"10px",flexWrap:"wrap"}}>
+              <span style={{background:roundColor(rec.round)+"22",color:roundColor(rec.round),
+                borderRadius:"20px",padding:"2px 10px",fontSize:"0.74rem",fontWeight:800}}>
+                Round {rec.round}
+              </span>
+              {rec.duration>0 && (
+                <span style={{background:T.card2,color:T.muted,borderRadius:"20px",padding:"2px 10px",fontSize:"0.74rem",fontWeight:700}}>
+                  ⏱ {fmtDuration(rec.duration)}
+                </span>
+              )}
+              {rec.wrongWords && rec.wrongWords.length>0 && (
+                <span style={{background:"#FF475720",color:T.wrong,borderRadius:"20px",padding:"2px 10px",fontSize:"0.74rem",fontWeight:700}}>
+                  ✗ {rec.wrongWords.length} missed
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Report Tab ────────────────────────────────────────────────────────────────
+function ReportTab({ history }) {
+  const [filter, setFilter] = useState("all");
+
+  if (history.length<2) {
+    return (
+      <div style={{textAlign:"center",padding:"40px 20px",color:T.muted,animation:"fadeUp 0.4s ease"}}>
+        <div style={{fontSize:"3rem",marginBottom:"12px"}}>📊</div>
+        <div style={{fontWeight:700,fontSize:"1.1rem",color:T.text,marginBottom:"6px"}}>Not enough data yet</div>
+        <div style={{fontSize:"0.88rem"}}>Complete at least 2 sessions to see your progress trend.</div>
+      </div>
+    );
+  }
+
+  const filtered  = filter==="all" ? history : history.filter(r=>r.round===parseInt(filter));
+  const chartData = filtered.map((r,i)=>({
+    session:  i+1,
+    score:    Math.round(r.score/r.total*100),
+    label:    `${fmtDate(r.id)} ${fmtTime(r.id)}`,
+    round:    r.round,
+    duration: r.duration,
+  }));
+
+  const avg      = chartData.length ? Math.round(chartData.reduce((s,d)=>s+d.score,0)/chartData.length) : 0;
+  const best     = chartData.length ? Math.max(...chartData.map(d=>d.score)) : 0;
+  const slice5   = chartData.slice(-Math.min(5,chartData.length));
+  const last5Avg = slice5.length ? Math.round(slice5.reduce((s,d)=>s+d.score,0)/slice5.length) : avg;
+  const trend    = chartData.length>=3 ? (last5Avg>=avg?"📈 Improving":"📉 Needs work") : "—";
+  const trendCol = chartData.length>=3 ? (last5Avg>=avg?T.correct:T.wrong) : T.muted;
+  const totalTime = history.reduce((s,r)=>s+(r.duration||0),0);
+
+  const byRound = [1,2,3].map(r=>{
+    const recs=history.filter(h=>h.round===r);
+    if (!recs.length) return null;
+    const a=Math.round(recs.reduce((s,h)=>s+Math.round(h.score/h.total*100),0)/recs.length);
+    return {round:r,avg:a,count:recs.length,color:roundColor(r)};
+  }).filter(Boolean);
+
+  function CustomTooltip({active,payload}) {
+    if (!active||!payload?.length) return null;
+    const d=payload[0].payload;
+    return (
+      <div style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:"10px",padding:"10px 14px"}}>
+        <div style={{fontWeight:800,color:T.text,fontSize:"0.88rem"}}>Session {d.session}</div>
+        <div style={{color:T.muted,fontSize:"0.76rem"}}>{d.label}</div>
+        <div style={{fontFamily:T.head,fontSize:"1.4rem",color:"#74B9FF",marginTop:"4px"}}>{d.score}%</div>
+        <div style={{color:roundColor(d.round),fontSize:"0.76rem"}}>Round {d.round}</div>
+        {d.duration>0 && <div style={{color:T.muted,fontSize:"0.74rem"}}>⏱ {fmtDuration(d.duration)}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{width:"100%",maxWidth:"520px",animation:"slideIn 0.35s ease"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"14px"}}>
+        {[
+          {label:"Total Sessions", val:history.length,         icon:"📚", color:"#74B9FF"},
+          {label:"Total Time",     val:fmtDuration(totalTime), icon:"⏱",  color:"#A29BFE"},
+          {label:"Best Score",     val:`${best}%`,             icon:"🌟", color:T.gold},
+          {label:"Overall Avg",   val:`${avg}%`,              icon:"📊", color:"#4ECDC4"},
+        ].map(s=>(
+          <div key={s.label} style={{background:T.card,border:`1px solid ${T.border}`,
+            borderRadius:"14px",padding:"14px 12px",display:"flex",alignItems:"center",gap:"12px"}}>
+            <span style={{fontSize:"1.6rem"}}>{s.icon}</span>
+            <div>
+              <div style={{fontFamily:T.head,fontSize:"1.35rem",color:s.color,lineHeight:1}}>{s.val}</div>
+              <div style={{color:T.muted,fontSize:"0.72rem",marginTop:"2px"}}>{s.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Card style={{marginBottom:"14px",padding:"14px 18px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:"0.78rem",color:T.muted,letterSpacing:"0.05em",marginBottom:"4px"}}>
+              RECENT TREND (last 5 sessions)
+            </div>
+            <div style={{fontFamily:T.head,fontSize:"1.5rem",color:trendCol}}>{trend}</div>
+            {chartData.length>=3 && (
+              <div style={{color:T.muted,fontSize:"0.8rem",marginTop:"2px"}}>
+                Last 5 avg: <strong style={{color:T.text}}>{last5Avg}%</strong> vs overall <strong style={{color:T.text}}>{avg}%</strong>
+              </div>
+            )}
+          </div>
+          <div style={{fontFamily:T.head,fontSize:"3rem",color:trendCol,opacity:0.7}}>
+            {chartData.length>=3?(last5Avg>=avg?"↗":"↘"):"~"}
+          </div>
+        </div>
+      </Card>
+
+      {byRound.length>0 && (
+        <Card style={{marginBottom:"14px"}}>
+          <div style={{fontWeight:800,fontSize:"0.78rem",color:T.muted,letterSpacing:"0.05em",marginBottom:"12px"}}>
+            AVERAGE BY ROUND
+          </div>
+          {byRound.map(r=>(
+            <div key={r.round} style={{marginBottom:"10px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px"}}>
+                <span style={{fontWeight:700,color:r.color,fontSize:"0.86rem"}}>
+                  Round {r.round} · {r.count} session{r.count>1?"s":""}
+                </span>
+                <span style={{fontWeight:800,color:r.color}}>{r.avg}%</span>
+              </div>
+              <div style={{height:"8px",background:T.card2,borderRadius:"4px",overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${r.avg}%`,background:r.color,borderRadius:"4px",transition:"width 0.6s ease"}}/>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <div style={{display:"flex",gap:"6px",marginBottom:"12px",flexWrap:"wrap"}}>
+        {[["all","All Rounds"],["1","Round 1"],["2","Round 2"],["3","Round 3"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilter(v)} style={{
+            background:filter===v?"#74B9FF":T.card2, color:filter===v?"#fff":T.muted,
+            border:"none", borderRadius:"20px", padding:"5px 13px",
+            fontSize:"0.77rem", fontWeight:800, cursor:"pointer", fontFamily:T.font, transition:"all 0.15s",
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {chartData.length>=2 ? (
+        <Card>
+          <div style={{fontWeight:800,fontSize:"0.78rem",color:T.muted,letterSpacing:"0.05em",marginBottom:"14px"}}>
+            SCORE TREND — {chartData.length} SESSION{chartData.length!==1?"S":""}
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chartData} margin={{top:5,right:10,bottom:10,left:-10}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={T.border}/>
+              <XAxis dataKey="session" tick={{fill:T.muted,fontSize:11}}
+                label={{value:"Session #",position:"insideBottom",offset:-4,fill:T.muted,fontSize:11}}/>
+              <YAxis domain={[0,100]} tick={{fill:T.muted,fontSize:11}} tickFormatter={v=>`${v}%`}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <ReferenceLine y={avg} stroke="#74B9FF44" strokeDasharray="5 5"/>
+              <Line type="monotone" dataKey="score" stroke="#74B9FF" strokeWidth={3}
+                dot={{fill:"#74B9FF",r:5,strokeWidth:2,stroke:T.card}}
+                activeDot={{r:7,fill:"#A29BFE"}}/>
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{textAlign:"center",color:T.muted,fontSize:"0.74rem",marginTop:"6px"}}>
+            Dashed line = overall average ({avg}%)
+          </div>
+        </Card>
+      ) : (
+        <div style={{color:T.muted,fontSize:"0.86rem",textAlign:"center",padding:"16px"}}>
+          Need at least 2 sessions in this filter to show the trend chart.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Home Screen ───────────────────────────────────────────────────────────────
+function HomeScreen({ onStart, onStartGroup, history, onClearHistory }) {
+  const [tab, setTab]   = useState("practice");
+  const [hovG, setHovG] = useState(null);
+  return (
+    <Page>
+      <div style={{textAlign:"center",paddingTop:"8px"}}>
+        <div style={{fontSize:"3rem"}}>📝</div>
+        <h1 style={{fontFamily:T.head,fontSize:"2.4rem",margin:"6px 0 2px",
+          background:"linear-gradient(135deg,#74B9FF 30%,#FD79A8 70%)",
+          WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
+          Spelling Master
+        </h1>
+        <p style={{color:T.muted,margin:0,fontSize:"0.86rem"}}>11+ Exam Preparation · 60 Words · 3 Rounds</p>
+      </div>
+
+      <TabBar tab={tab} setTab={setTab}/>
+
+      {tab==="practice" && (
+        <div style={{width:"100%",maxWidth:"520px",animation:"fadeUp 0.3s ease",display:"flex",flexDirection:"column",gap:"14px"}}>
+          <Card>
+            <p style={{color:T.muted,fontSize:"0.76rem",fontWeight:800,margin:"0 0 12px",letterSpacing:"0.05em"}}>HOW IT WORKS</p>
+            {[
+              {n:"Round 1",c:"#74B9FF",i:"👀",d:"Study each word group then spell 10 words — with audio help!"},
+              {n:"Round 2",c:"#A29BFE",i:"🔀",d:"All 60 words mixed — tricky words appear more often"},
+              {n:"Round 3",c:"#FD79A8",i:"🎯",d:"Your personal tricky words only — practise until perfect"},
+            ].map(r=>(
+              <div key={r.n} style={{display:"flex",gap:"12px",padding:"11px 13px",background:T.card2,borderRadius:"12px",marginBottom:"8px"}}>
+                <span style={{fontSize:"1.4rem",lineHeight:1}}>{r.i}</span>
+                <div>
+                  <div style={{fontWeight:800,color:r.c,fontSize:"0.9rem"}}>{r.n}</div>
+                  <div style={{color:T.muted,fontSize:"0.8rem",marginTop:"2px"}}>{r.d}</div>
+                </div>
+              </div>
+            ))}
+          </Card>
+          <Card>
+            <p style={{color:T.muted,fontSize:"0.76rem",fontWeight:800,margin:"0 0 10px",letterSpacing:"0.05em"}}>
+              6 WORD GROUPS · 10 words each ·{" "}
+              <span style={{color:"#74B9FF"}}>click any group to jump straight in</span>
+            </p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+              {GROUPS.map(g=>(
+                <div key={g.id}
+                  onClick={()=>onStartGroup(g.id)}
+                  onMouseEnter={()=>setHovG(g.id)}
+                  onMouseLeave={()=>setHovG(null)}
+                  style={{
+                    padding:"12px 12px 10px",
+                    background: hovG===g.id ? g.color+"22" : T.card2,
+                    borderRadius:"12px",
+                    border: hovG===g.id ? `1.5px solid ${g.color}` : `1px solid transparent`,
+                    borderLeft:`3px solid ${g.color}`,
+                    cursor:"pointer",
+                    transform: hovG===g.id ? "translateY(-2px)" : "none",
+                    boxShadow: hovG===g.id ? `0 6px 18px ${g.color}33` : "none",
+                    transition:"all 0.18s ease",
+                  }}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <span style={{fontSize:"1.1rem"}}>{g.icon}</span>
+                    {hovG===g.id && (
+                      <span style={{fontSize:"0.7rem",fontWeight:800,color:g.color,
+                        background:g.color+"22",borderRadius:"20px",padding:"2px 7px"}}>
+                        ▶ Start
+                      </span>
+                    )}
+                  </div>
+                  <div style={{fontWeight:700,color:hovG===g.id?g.color:T.muted,
+                    fontSize:"0.78rem",lineHeight:1.3,marginTop:"5px",transition:"color 0.15s"}}>
+                    {g.name}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Btn onClick={onStart} bg="linear-gradient(135deg,#74B9FF,#A29BFE)" large full>
+            🚀 Start All Groups from Round 1
+          </Btn>
+        </div>
+      )}
+      {tab==="history" && <HistoryTab history={history} onClear={onClearHistory}/>}
+      {tab==="report"  && <ReportTab  history={history}/>}
+    </Page>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [screen,     setScreen]     = useState("home");
+  const [round,      setRound]      = useState(1);
+  const [groupIdx,   setGroupIdx]   = useState(0);
+  const [quizWords,  setQuizWords]  = useState([]);
+  const [sessionRes, setSessionRes] = useState([]);
+  const [sessionDur, setSessionDur] = useState(0);
+  const [r2Session,  setR2Session]  = useState(0);
+  const [r3Done,     setR3Done]     = useState(new Set());
+  const [history,    setHistory]    = useState([]);
+
+  const weightsRef = useRef({});
+  const wrongRef   = useRef(new Set());
+  const historyRef = useRef([]);
+
+  useEffect(()=>{
+    const h = storageLoad();
+    setHistory(h); historyRef.current = h;
+  }, []);
+
+  const markWrong = (word) => {
+    wrongRef.current = new Set([...wrongRef.current, word]);
+    weightsRef.current[word] = (weightsRef.current[word]||1)+3;
+  };
+
+  const saveSession = (results, durationSecs, rnd, gi) => {
+    const score = results.filter(r=>r.correct).length;
+    const rc    = rnd ?? round;
+    const label = rc===1
+      ? `${GROUPS[gi??groupIdx].icon} ${GROUPS[gi??groupIdx].name}`
+      : rc===2 ? "Round 2 Mixed Words" : "Round 3 Tricky Words";
+    const rec = {
+      id:         new Date().toISOString(),
+      round:      rc, label, score,
+      total:      results.length,
+      duration:   durationSecs,
+      wrongWords: results.filter(r=>!r.correct).map(r=>r.word),
+    };
+    const next = [...historyRef.current, rec];
+    historyRef.current = next;
+    setHistory(next);
+    storageSave(next);
+  };
+
+  const clearHistory = () => {
+    historyRef.current=[]; setHistory([]); storageSave([]);
+  };
+
+  const goHome = () => {
+    weightsRef.current={}; wrongRef.current=new Set();
+    setScreen("home"); setRound(1); setGroupIdx(0); setR2Session(0); setR3Done(new Set());
+  };
+
+  const goStudy  = gi => { setGroupIdx(gi); setScreen("study"); };
+  const goR1Quiz = gi => { setRound(1); setGroupIdx(gi); setQuizWords([...GROUPS[gi].words]); setScreen("quiz"); };
+  const goR2     = (ses=0) => { setRound(2); setR2Session(ses); setQuizWords(weightedPick(ALL_WORDS, weightsRef.current, 15)); setScreen("quiz"); };
+  const goR3     = (doneSoFar=new Set()) => {
+    setRound(3);
+    const rem = [...wrongRef.current].filter(w=>!doneSoFar.has(w));
+    if (!rem.length) { setScreen("final"); return; }
+    setQuizWords(weightedPick(rem, weightsRef.current, Math.min(15,rem.length)));
+    setScreen("quiz");
+  };
+
+  const handleQuizDone = (results, durationSecs) => {
+    saveSession(results, durationSecs, round, groupIdx);
+    setSessionRes(results); setSessionDur(durationSecs); setScreen("session-end");
+  };
+
+  const handleContinue = () => {
+    if (round===1) {
+      const n=groupIdx+1; if (n<GROUPS.length) goStudy(n); else goR2(0);
+    } else if (round===2) {
+      const n=r2Session+1; if (n<R2_TOTAL) goR2(n); else goR3(new Set());
+    } else {
+      const nd=new Set([...r3Done,...quizWords]); setR3Done(nd); goR3(nd);
+    }
+  };
+
+  let continueLabel = "Continue →";
+  if (round===1) {
+    const ng=groupIdx+1;
+    continueLabel = ng<GROUPS.length
+      ? `Next Group: ${GROUPS[ng].icon} ${GROUPS[ng].name} →`
+      : "Start Round 2: Mixed! 🔀";
+  } else if (round===2) {
+    const ns=r2Session+1;
+    continueLabel = ns<R2_TOTAL
+      ? `Round 2 · Session ${ns+1} of ${R2_TOTAL} →`
+      : (wrongRef.current.size>0 ? "Start Round 3: Tricky Words! 🎯" : "See Final Results 🏆");
+  } else {
+    const dnc=new Set([...r3Done,...quizWords]);
+    const rem=[...wrongRef.current].filter(w=>!dnc.has(w));
+    continueLabel = rem.length>0 ? `Continue (${rem.length} left) →` : "See Final Results! 🏆";
+  }
+
+  const quizKey      = `${round}-${groupIdx}-${r2Session}-${quizWords[0]||""}-${quizWords.length}`;
+  const sessionLabel = round===1
+    ? `${GROUPS[groupIdx].icon} ${GROUPS[groupIdx].name}`
+    : round===2 ? `Session ${r2Session+1} of ${R2_TOTAL}`
+    : `${wrongRef.current.size} tricky words`;
+
+  if (screen==="home")
+    return <HomeScreen onStart={()=>goStudy(0)} onStartGroup={gi=>goStudy(gi)} history={history} onClearHistory={clearHistory}/>;
+  if (screen==="study")
+    return <StudyScreen group={GROUPS[groupIdx]} groupNum={groupIdx+1} onReady={()=>goR1Quiz(groupIdx)} onHome={goHome}/>;
+  if (screen==="quiz")
+    return <QuizScreen key={quizKey} words={quizWords} round={round}
+      group={round===1?GROUPS[groupIdx]:null} sessionLabel={sessionLabel}
+      onDone={handleQuizDone} onWrong={markWrong} onHome={goHome}/>;
+  if (screen==="session-end")
+    return <SessionEndScreen results={sessionRes} round={round} duration={sessionDur}
+      continueLabel={continueLabel} onContinue={handleContinue} onHome={goHome}/>;
+  if (screen==="final")
+    return <FinalScreen wrongWords={wrongRef.current} onRestart={()=>goStudy(0)} onHome={goHome}/>;
+  return null;
+}
+
+// ── Mount ─────────────────────────────────────────────────────────────────────
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+</script>
+</body>
+</html>
